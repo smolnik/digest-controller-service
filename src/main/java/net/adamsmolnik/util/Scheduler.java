@@ -20,14 +20,14 @@ public class Scheduler {
 
     private final int corePoolSize = 20;
 
-    private final ScheduledExecutorService taskExecutor = Executors.newScheduledThreadPool(corePoolSize);
+    private final ScheduledExecutorService tasksExecutor = Executors.newScheduledThreadPool(corePoolSize);
 
-    public <T> T schedule(Supplier<Optional<T>> task, int period, int timeout, TimeUnit unit) {
+    public <T> T scheduleAndWaitFor(Supplier<Optional<T>> task, int period, int timeout, TimeUnit unit) {
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<T> resultRef = new AtomicReference<>();
         AtomicReference<SchedulerException> exceptionCaught = new AtomicReference<>();
         Object taskGuard = new Object();
-        ScheduledFuture<?> sf = taskExecutor.scheduleAtFixedRate(() -> {
+        ScheduledFuture<?> sf = tasksExecutor.scheduleWithFixedDelay(() -> {
             try {
                 synchronized (taskGuard) {
                     if (latch.getCount() > 0) {
@@ -66,8 +66,12 @@ public class Scheduler {
         throw new TimeoutException("Possibly timeout happened after " + timeout + " " + unit);
     }
 
+    public void schedule(Runnable task, int delay, TimeUnit unit) {
+        tasksExecutor.schedule(task, delay, unit);
+    }
+
     public void shutdown() {
-        taskExecutor.shutdownNow();
+        tasksExecutor.shutdownNow();
     }
 
 }

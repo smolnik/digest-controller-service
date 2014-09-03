@@ -14,7 +14,7 @@ public class Log {
     }
 
     public void err(String logItem) {
-        System.err.println(logItem);
+        System.out.println(logItem);
     }
 
     public void err(Throwable t) {

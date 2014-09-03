@@ -9,10 +9,10 @@ import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Response;
 import net.adamsmolnik.control.fallback.Fallback;
 import net.adamsmolnik.control.fallback.Params;
-import net.adamsmolnik.control.fallback.ParamsView;
 import net.adamsmolnik.exceptions.ServiceException;
 import net.adamsmolnik.model.digest.DigestRequest;
 import net.adamsmolnik.model.digest.DigestResponse;
+import net.adamsmolnik.util.LocalServiceUrlCache;
 import net.adamsmolnik.util.Log;
 
 /**
@@ -26,6 +26,9 @@ public class DigestController {
     private Fallback fallback;
 
     @Inject
+    private LocalServiceUrlCache cache;
+
+    @Inject
     private Log log;
 
     private final String serviceContext = "/digest-service-no-limit";
@@ -34,23 +37,33 @@ public class DigestController {
 
     private final String basicServerAddress = "http://digest.adamsmolnik.com";
 
-    //{"algorithm":"SHA-256","objectKey":"largefiles/file_sizedOf100000000","id":"9dcf049c-58eb-40af-9c81-036fbdede3fa"}
-    // cleaning dodac pod 30 min
     public DigestResponse execute(DigestRequest digestRequest) {
         try {
-            String url = basicServerAddress + serviceContext + servicePath;
-            return trySending(digestRequest, url, 6, 5);
+            String serviceFullPath = serviceContext + servicePath;
+            String url = basicServerAddress + serviceFullPath;
+            String serviceUrl = cache.getUrl(url);
+            if (serviceUrl != null) {
+                try {
+                    return trySending(digestRequest, serviceUrl, 2, 5);
+                } catch (Exception ex) {
+                    log.err("exception after giving the url being already cached a try");
+                    log.err(ex);
+                }
+            }
+            return trySending(digestRequest, url, 7, 10);
         } catch (Exception ex) {
             log.err(ex);
-            ParamsView params = new Params().withInstanceType("t2.micro").withAmiId("ami-e4ba1d8c");
+            Params params = new Params().withInstanceType("t2.micro").withAmiId("ami-e4ba1d8c").withServiceContext(serviceContext)
+                    .withServicePath(servicePath);
             return fallback.perform(params, (urlNext) -> {
                 try {
-                    return trySending(digestRequest, urlNext, 6, 5);
+                    return trySending(digestRequest, urlNext, 7, 5);
                 } catch (Exception exNext) {
                     log.err(exNext);
+                    params.withInstanceType("t2.small").withAmiId("ami-2e0ea946");
                     return fallback.perform(params, (urlNextNext) -> {
                         try {
-                            return trySending(digestRequest, urlNextNext, 6, 5);
+                            return trySending(digestRequest, urlNextNext, 7, 5);
                         } catch (Exception exNextNext) {
                             log.err(exNextNext);
                             throw new ServiceException(exNextNext);

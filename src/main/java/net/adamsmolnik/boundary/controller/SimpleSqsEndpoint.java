@@ -5,10 +5,13 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import javax.inject.Inject;
 import javax.inject.Singleton;
+import net.adamsmolnik.util.Log;
 import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.amazonaws.services.sqs.model.DeleteMessageRequest;
@@ -24,11 +27,16 @@ import com.google.gson.Gson;
 @Singleton
 public class SimpleSqsEndpoint {
 
-    private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
-
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    @Inject
+    private Log log;
 
     private final Gson json = new Gson();
+
+    private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
+
+    private final ExecutorService tasksExecutor = Executors.newFixedThreadPool(10);
+
+    private ScheduledFuture<?> pollerFuture;
 
     private final AmazonSQS sqs;
 
@@ -58,12 +66,12 @@ public class SimpleSqsEndpoint {
     }
 
     public final <T, R> void handle(Function<T, R> requestProcessor, Function<String, T> requestMapper, String queueIn, Optional<String> queueOut) {
-        poller.scheduleAtFixedRate(() -> {
+        pollerFuture = poller.scheduleWithFixedDelay(() -> {
             try {
                 List<Message> messages = sqs.receiveMessage(new ReceiveMessageRequest().withQueueUrl(queueIn)).getMessages();
                 for (Message message : messages) {
                     T request = requestMapper.apply(message.getBody());
-                    executor.submit(() -> {
+                    tasksExecutor.submit(() -> {
                         R response = requestProcessor.apply(request);
                         if (queueOut.isPresent()) {
                             sqs.sendMessage(new SendMessageRequest(queueOut.get(), json.toJson(response)));
@@ -72,15 +80,18 @@ public class SimpleSqsEndpoint {
                     sqs.deleteMessage(new DeleteMessageRequest(queueIn, message.getReceiptHandle()));
                 }
             } catch (Exception ex) {
-                ex.printStackTrace();
+                log.err(ex);
             }
 
         }, 0, 10, TimeUnit.SECONDS);
     }
 
     public void shutdown() {
-        sqs.shutdown();
+        if (pollerFuture != null) {
+            pollerFuture.cancel(true);
+        }
         poller.shutdownNow();
-        executor.shutdownNow();
+        tasksExecutor.shutdownNow();
+        sqs.shutdown();
     }
 }

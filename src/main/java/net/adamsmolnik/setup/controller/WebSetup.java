@@ -11,6 +11,7 @@ import net.adamsmolnik.model.digest.DigestRequest;
 import net.adamsmolnik.setup.ServiceNameResolver;
 import net.adamsmolnik.util.Configuration;
 import net.adamsmolnik.util.OutOfMemoryAlarm;
+import net.adamsmolnik.util.Scheduler;
 
 /**
  * @author ASmolnik
@@ -26,13 +27,16 @@ public class WebSetup implements ServletContextListener {
     private Configuration conf;
 
     @Inject
-    private OutOfMemoryAlarm oooAlarm;
+    private OutOfMemoryAlarm oomAlarm;
 
     @Inject
     private SimpleSqsEndpoint endpoint;
 
     @Inject
     private DigestController dc;
+
+    @Inject
+    private Scheduler scheduler;
 
     @Override
     public void contextInitialized(ServletContextEvent sce) {
@@ -41,14 +45,15 @@ public class WebSetup implements ServletContextListener {
             return dc.execute(request);
         }, DigestRequest.class, confMap.get("queueIn"), confMap.get("queueOut"));
         endpoint.handleVoid((request) -> {
-            oooAlarm.setAsReported();
-        }, confMap.get("oooExceptionsQueue"));
+            oomAlarm.setAsReported();
+        }, confMap.get("oomExceptionsQueue"));
 
     }
 
     @Override
     public void contextDestroyed(ServletContextEvent sce) {
         endpoint.shutdown();
+        scheduler.shutdown();
     }
 
 }

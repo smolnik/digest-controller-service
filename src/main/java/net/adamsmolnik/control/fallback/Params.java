@@ -19,17 +19,17 @@ public class Params implements ParamsView {
         return this;
     }
 
-    public ParamsView withAmiId(String amiId) {
+    public Params withAmiId(String amiId) {
         this.amiId = amiId;
         return this;
     }
 
-    public ParamsView withServiceContext(String serviceContext) {
+    public Params withServiceContext(String serviceContext) {
         this.serviceContext = serviceContext;
         return this;
     }
 
-    public ParamsView withServicePath(String servicePath) {
+    public Params withServicePath(String servicePath) {
         this.servicePath = servicePath;
         return this;
     }
@@ -52,6 +52,11 @@ public class Params implements ParamsView {
     @Override
     public String getServicePath() {
         return servicePath;
+    }
+
+    @Override
+    public String getServiceFullPath() {
+        return serviceContext + servicePath;
     }
 
 }
