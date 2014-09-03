@@ -1,5 +1,8 @@
 package net.adamsmolnik.control.fallback;
 
+import java.util.Optional;
+import javax.validation.constraints.NotNull;
+
 /**
  * @author ASmolnik
  *
@@ -14,6 +17,12 @@ public class Params implements ParamsView {
 
     private String servicePath;
 
+    private Optional<String> elb = Optional.empty();
+
+    private Optional<String> dnsName = Optional.empty();
+
+    private boolean waitForOOMAlarm;
+
     public Params withInstanceType(String type) {
         this.instanceType = type;
         return this;
@@ -21,6 +30,13 @@ public class Params implements ParamsView {
 
     public Params withAmiId(String amiId) {
         this.amiId = amiId;
+        return this;
+    }
+
+    @NotNull
+    public Params withElbAndDnsName(String elb, String dnsName) {
+        this.elb = Optional.of(elb);
+        this.dnsName = Optional.of(dnsName);
         return this;
     }
 
@@ -34,6 +50,11 @@ public class Params implements ParamsView {
         return this;
     }
 
+    public Params withWaitForOOMAlarm(boolean waitForOOMAlarm) {
+        this.waitForOOMAlarm = waitForOOMAlarm;
+        return this;
+    }
+
     @Override
     public String getInstanceType() {
         return instanceType;
@@ -42,6 +63,16 @@ public class Params implements ParamsView {
     @Override
     public String getAmiId() {
         return amiId;
+    }
+
+    @Override
+    public Optional<String> getElb() {
+        return elb;
+    }
+
+    @Override
+    public Optional<String> getDnsName() {
+        return dnsName;
     }
 
     @Override
@@ -57,6 +88,11 @@ public class Params implements ParamsView {
     @Override
     public String getServiceFullPath() {
         return serviceContext + servicePath;
+    }
+
+    @Override
+    public boolean waitForOOMAlarm() {
+        return waitForOOMAlarm;
     }
 
 }

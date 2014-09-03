@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import javax.enterprise.context.Dependent;
 import javax.inject.Inject;
+import javax.naming.spi.DirStateFactory.Result;
 import net.adamsmolnik.exceptions.ServiceException;
 import net.adamsmolnik.util.LocalServiceUrlCache;
 import net.adamsmolnik.util.Log;
@@ -27,6 +28,11 @@ import com.amazonaws.services.ec2.model.RunInstancesRequest;
 import com.amazonaws.services.ec2.model.RunInstancesResult;
 import com.amazonaws.services.ec2.model.Tag;
 import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
+import com.amazonaws.services.elasticloadbalancing.AmazonElasticLoadBalancing;
+import com.amazonaws.services.elasticloadbalancing.AmazonElasticLoadBalancingClient;
+import com.amazonaws.services.elasticloadbalancing.model.DeregisterInstancesFromLoadBalancerRequest;
+import com.amazonaws.services.elasticloadbalancing.model.DeregisterInstancesFromLoadBalancerResult;
+import com.amazonaws.services.elasticloadbalancing.model.RegisterInstancesWithLoadBalancerRequest;
 
 /**
  * @author ASmolnik
@@ -47,29 +53,34 @@ public class Fallback {
     @Inject
     private Log log;
 
-    private final AmazonEC2Client ec2Client = new AmazonEC2Client();
+    private final AmazonEC2Client ec2 = new AmazonEC2Client();
+
+    private final AmazonElasticLoadBalancing elb = new AmazonElasticLoadBalancingClient();
 
     public <T, R> R perform(ParamsView pv, Function<String, R> send) {
         String serviceFullPath = pv.getServiceFullPath();
-        Instance instance = null;
+        Instance newInstance = null;
         String newDigestAppUrl = null;
         try {
-            waitUntilOutOfMemoryAlarmReported();
+            if (pv.waitForOOMAlarm()) {
+                waitUntilOutOfMemoryAlarmReported();
+            }
             String type = pv.getInstanceType();
-            instance = setupNewDigestInstance(type, pv.getAmiId());
-            waitUntilNewInstanceGetsReady(instance, 600);
-            String newInstanceUrl = fetchInstanceUrl(instance);
-            newDigestAppUrl = buildAppUrl(newInstanceUrl, pv.getServiceContext());
+            newInstance = setupNewDigestInstance(type, pv.getAmiId());
+            waitUntilNewInstanceGetsReady(newInstance, 600);
+            newInstance = fetchInstance(newInstance);
+            attachInstanceToElb(newInstance, pv);
+            newDigestAppUrl = buildAppUrl(newInstance, pv);
             sendHealthCheckUntilGetHealthy(newDigestAppUrl);
             String serviceUrl = newDigestAppUrl + pv.getServicePath();
             R response = send.apply(serviceUrl);
             cache.put(serviceFullPath, serviceUrl);
-            scheduleCleanup(instance, serviceFullPath);
+            scheduleCleanup(newInstance, pv);
             return response;
         } catch (Exception ex) {
             log(ex);
-            if (instance != null) {
-                cleanup(instance);
+            if (newInstance != null) {
+                cleanup(newInstance, pv);
             }
             throw new ServiceException(ex);
         }
@@ -115,13 +126,17 @@ public class Fallback {
         }, 15, 300, TimeUnit.SECONDS);
     }
 
-    private String fetchInstanceUrl(Instance instance) {
-        String newInstanceUrl = instance.getPublicIpAddress();
-        if (newInstanceUrl == null) {
-            newInstanceUrl = ec2Client.describeInstances(new DescribeInstancesRequest().withInstanceIds(instance.getInstanceId())).getReservations()
-                    .get(0).getInstances().get(0).getPublicIpAddress();
+    private void attachInstanceToElb(Instance instance, ParamsView pv) {
+        Optional<String> elbParam = pv.getElb();
+        if (elbParam.isPresent()) {
+            elb.registerInstancesWithLoadBalancer(new RegisterInstancesWithLoadBalancerRequest().withLoadBalancerName(elbParam.get()).withInstances(
+                    mapModel(instance)));
         }
-        return newInstanceUrl;
+    }
+
+    private Instance fetchInstance(Instance instance) {
+        return ec2.describeInstances(new DescribeInstancesRequest().withInstanceIds(instance.getInstanceId())).getReservations().get(0)
+                .getInstances().get(0);
     }
 
     private Instance setupNewDigestInstance(String type, String imageId) {
@@ -136,7 +151,7 @@ public class Fallback {
                 .withIamInstanceProfile(
                         new IamInstanceProfileSpecification()
                                 .withArn("arn:aws:iam::542175458111:instance-profile/glassfish-40-x-java8-InstanceProfile-7HFPC4EC3Z0V"));
-        RunInstancesResult result = ec2Client.runInstances(request);
+        RunInstancesResult result = ec2.runInstances(request);
         Instance instance = result.getReservation().getInstances().get(0);
 
         List<Tag> tags = new ArrayList<>();
@@ -147,14 +162,14 @@ public class Fallback {
         CreateTagsRequest ctr = new CreateTagsRequest();
         ctr.setTags(tags);
         ctr.withResources(instance.getInstanceId());
-        ec2Client.createTags(ctr);
+        ec2.createTags(ctr);
         return instance;
     }
 
     private InstanceStatus waitUntilNewInstanceGetsReady(Instance instance, int timeoutSec) {
         return scheduler.scheduleAndWaitFor(() -> {
             String instanceId = instance.getInstanceId();
-            List<InstanceStatus> instanceStatuses = ec2Client.describeInstanceStatus(new DescribeInstanceStatusRequest().withInstanceIds(instanceId))
+            List<InstanceStatus> instanceStatuses = ec2.describeInstanceStatus(new DescribeInstanceStatusRequest().withInstanceIds(instanceId))
                     .getInstanceStatuses();
             if (!instanceStatuses.isEmpty()) {
                 InstanceStatus is = instanceStatuses.get(0);
@@ -164,19 +179,33 @@ public class Fallback {
         }, 15, timeoutSec, TimeUnit.SECONDS);
     }
 
-    private void scheduleCleanup(Instance instance, String serviceLogicalPath) {
+    private void scheduleCleanup(Instance instance, ParamsView pv) {
         scheduler.schedule(() -> {
-            cache.remove(serviceLogicalPath);
-            cleanup(instance);
-        }, 10, TimeUnit.MINUTES);
+            cache.remove(pv.getServiceFullPath());
+            cleanup(instance, pv);
+        }, 15, TimeUnit.MINUTES);
     }
 
-    private void cleanup(Instance instance) {
-        ec2Client.terminateInstances(new TerminateInstancesRequest().withInstanceIds(instance.getInstanceId()));
+    private void cleanup(Instance instance, ParamsView pv) {
+        Optional<String> elbParam = pv.getElb();
+        if (elbParam.isPresent()) {
+            DeregisterInstancesFromLoadBalancerResult result = elb
+                    .deregisterInstancesFromLoadBalancer(new DeregisterInstancesFromLoadBalancerRequest().withLoadBalancerName(elbParam.get())
+                            .withInstances(mapModel(instance)));
+            log.info("Instance " + instance.getInstanceId() + " deregistered from elb " + elbParam.get() + " with result " + result);
+        }
+        ec2.terminateInstances(new TerminateInstancesRequest().withInstanceIds(instance.getInstanceId()));
     }
 
-    private String buildAppUrl(String newInstanceUrl, String serviceContext) {
-        return "http://" + newInstanceUrl + ":8080" + serviceContext;
+    private String buildAppUrl(Instance newInstance, ParamsView pv) {
+        String serviceContext = pv.getServiceContext();
+        Optional<String> dnsName = pv.getDnsName();
+        String serverUrl = dnsName.isPresent() ? dnsName.get() : (newInstance.getPublicIpAddress() + ":8080");
+        return "http://" + serverUrl + serviceContext;
+    }
+
+    private com.amazonaws.services.elasticloadbalancing.model.Instance mapModel(Instance instance) {
+        return new com.amazonaws.services.elasticloadbalancing.model.Instance().withInstanceId(instance.getInstanceId());
     }
 
     private static boolean isReady(InstanceStatusSummary isSummary, InstanceStatusSummary ssSummary) {
