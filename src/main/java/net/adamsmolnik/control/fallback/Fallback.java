@@ -10,7 +10,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import javax.enterprise.context.Dependent;
 import javax.inject.Inject;
-import javax.naming.spi.DirStateFactory.Result;
 import net.adamsmolnik.exceptions.ServiceException;
 import net.adamsmolnik.util.LocalServiceUrlCache;
 import net.adamsmolnik.util.Log;
@@ -59,28 +58,27 @@ public class Fallback {
 
     public <T, R> R perform(ParamsView pv, Function<String, R> send) {
         String serviceFullPath = pv.getServiceFullPath();
-        Instance newInstance = null;
-        String newDigestAppUrl = null;
+        Instance newInstanceReady = null;
+        String newAppUrl = null;
         try {
             if (pv.waitForOOMAlarm()) {
                 waitUntilOutOfMemoryAlarmReported();
             }
-            String type = pv.getInstanceType();
-            newInstance = setupNewDigestInstance(type, pv.getAmiId());
-            waitUntilNewInstanceGetsReady(newInstance, 600);
-            newInstance = fetchInstance(newInstance);
-            attachInstanceToElb(newInstance, pv);
-            newDigestAppUrl = buildAppUrl(newInstance, pv);
-            sendHealthCheckUntilGetHealthy(newDigestAppUrl);
-            String serviceUrl = newDigestAppUrl + pv.getServicePath();
+            Instance newInstanceInitiated = setupNewInstance(pv);
+            waitUntilNewInstanceGetsReady(newInstanceInitiated, 600);
+            newInstanceReady = fetchInstanceDetails(newInstanceInitiated);
+            attachInstanceToElb(newInstanceReady, pv);
+            newAppUrl = buildAppUrl(newInstanceReady, pv);
+            sendHealthCheckUntilGetsHealthy(newAppUrl);
+            String serviceUrl = newAppUrl + pv.getServicePath();
             R response = send.apply(serviceUrl);
             cache.put(serviceFullPath, serviceUrl);
-            scheduleCleanup(newInstance, pv);
+            scheduleCleanup(newInstanceReady, pv);
             return response;
         } catch (Exception ex) {
             log(ex);
-            if (newInstance != null) {
-                cleanup(newInstance, pv);
+            if (newInstanceReady != null) {
+                cleanup(newInstanceReady, pv);
             }
             throw new ServiceException(ex);
         }
@@ -102,8 +100,8 @@ public class Fallback {
         log.info("OOM alarm report has arrived");
     }
 
-    private void sendHealthCheckUntilGetHealthy(String newDigestAppUrl) {
-        String healthCheckUrl = newDigestAppUrl + "/hc";
+    private void sendHealthCheckUntilGetsHealthy(String newAppUrl) {
+        String healthCheckUrl = newAppUrl + "/hc";
         AtomicInteger hcExceptionCounter = new AtomicInteger();
         scheduler.scheduleAndWaitFor(() -> {
             try {
@@ -134,15 +132,15 @@ public class Fallback {
         }
     }
 
-    private Instance fetchInstance(Instance instance) {
+    private Instance fetchInstanceDetails(Instance instance) {
         return ec2.describeInstances(new DescribeInstancesRequest().withInstanceIds(instance.getInstanceId())).getReservations().get(0)
                 .getInstances().get(0);
     }
 
-    private Instance setupNewDigestInstance(String type, String imageId) {
+    private Instance setupNewInstance(ParamsView pv) {
         RunInstancesRequest request = new RunInstancesRequest();
-        request.withImageId(imageId)
-                .withInstanceType(type)
+        request.withImageId(pv.getImageId())
+                .withInstanceType(pv.getInstanceType())
                 .withMinCount(1)
                 .withMaxCount(1)
                 .withKeyName("adamsmolnik-net-key-pair")
@@ -157,7 +155,7 @@ public class Fallback {
         List<Tag> tags = new ArrayList<>();
         Tag t = new Tag();
         t.setKey("Name");
-        t.setValue("temporary fallback server for digest-service");
+        t.setValue("temporary fallback server for " + pv.getServiceName());
         tags.add(t);
         CreateTagsRequest ctr = new CreateTagsRequest();
         ctr.setTags(tags);

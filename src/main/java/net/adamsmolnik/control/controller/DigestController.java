@@ -12,6 +12,7 @@ import net.adamsmolnik.control.fallback.Params;
 import net.adamsmolnik.exceptions.ServiceException;
 import net.adamsmolnik.model.digest.DigestRequest;
 import net.adamsmolnik.model.digest.DigestResponse;
+import net.adamsmolnik.setup.ServiceNameResolver;
 import net.adamsmolnik.util.LocalServiceUrlCache;
 import net.adamsmolnik.util.Log;
 
@@ -30,6 +31,9 @@ public class DigestController {
 
     @Inject
     private Log log;
+
+    @Inject
+    private ServiceNameResolver snr;
 
     private final String serviceContext = "/digest-service-no-limit";
 
@@ -53,9 +57,9 @@ public class DigestController {
             return trySending(digestRequest, url, 7, 10);
         } catch (Exception ex) {
             log.err(ex);
-            Params params = new Params().withWaitForOOMAlarm(false).withInstanceType("t2.micro").withAmiId("ami-e4ba1d8c")
-                    .withElbAndDnsName("digest-service-elb-medium", "medium.digest.adamsmolnik.com").withServiceContext(serviceContext)
-                    .withServicePath(servicePath);
+            Params params = new Params().withServiceName(snr.getServiceName()).withWaitForOOMAlarm(false).withInstanceType("t2.micro")
+                    .withImageId("ami-e4ba1d8c").withElbAndDnsName("digest-service-elb-medium", "medium.digest.adamsmolnik.com")
+                    .withServiceContext(serviceContext).withServicePath(servicePath);
             return fallback.perform(
                     params,
                     (urlNext) -> {
@@ -63,7 +67,7 @@ public class DigestController {
                             return trySending(digestRequest, urlNext, 7, 5);
                         } catch (Exception exNext) {
                             log.err(exNext);
-                            params.withWaitForOOMAlarm(false).withInstanceType("t2.small").withAmiId("ami-2e0ea946")
+                            params.withWaitForOOMAlarm(false).withInstanceType("t2.small").withImageId("ami-2e0ea946")
                                     .withElbAndDnsName("digest-service-elb-large", "large.digest.adamsmolnik.com");
                             return fallback.perform(params, (urlNextNext) -> {
                                 try {

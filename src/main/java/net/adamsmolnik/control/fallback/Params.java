@@ -9,9 +9,11 @@ import javax.validation.constraints.NotNull;
  */
 public class Params implements ParamsView {
 
+    private String serviceName;
+
     private String instanceType;
 
-    private String amiId;
+    private String imageId;
 
     private String serviceContext;
 
@@ -23,13 +25,18 @@ public class Params implements ParamsView {
 
     private boolean waitForOOMAlarm;
 
-    public Params withInstanceType(String type) {
-        this.instanceType = type;
+    public Params withServiceName(String value) {
+        this.serviceName = value;
         return this;
     }
 
-    public Params withAmiId(String amiId) {
-        this.amiId = amiId;
+    public Params withInstanceType(String value) {
+        this.instanceType = value;
+        return this;
+    }
+
+    public Params withImageId(String value) {
+        this.imageId = value;
         return this;
     }
 
@@ -40,19 +47,24 @@ public class Params implements ParamsView {
         return this;
     }
 
-    public Params withServiceContext(String serviceContext) {
-        this.serviceContext = serviceContext;
+    public Params withServiceContext(String value) {
+        this.serviceContext = value;
         return this;
     }
 
-    public Params withServicePath(String servicePath) {
-        this.servicePath = servicePath;
+    public Params withServicePath(String value) {
+        this.servicePath = value;
         return this;
     }
 
-    public Params withWaitForOOMAlarm(boolean waitForOOMAlarm) {
-        this.waitForOOMAlarm = waitForOOMAlarm;
+    public Params withWaitForOOMAlarm(boolean value) {
+        this.waitForOOMAlarm = value;
         return this;
+    }
+
+    @Override
+    public String getServiceName() {
+        return serviceName;
     }
 
     @Override
@@ -61,8 +73,8 @@ public class Params implements ParamsView {
     }
 
     @Override
-    public String getAmiId() {
-        return amiId;
+    public String getImageId() {
+        return imageId;
     }
 
     @Override

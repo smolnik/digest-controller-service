@@ -8,9 +8,11 @@ import java.util.Optional;
  */
 public interface ParamsView {
 
+    String getServiceName();
+
     String getInstanceType();
 
-    String getAmiId();
+    String getImageId();
 
     String getServiceContext();
 
