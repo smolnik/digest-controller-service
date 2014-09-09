@@ -5,8 +5,8 @@ import javax.inject.Inject;
 import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
-import net.adamsmolnik.boundary.controller.SimpleSqsEndpoint;
 import net.adamsmolnik.control.controller.DigestController;
+import net.adamsmolnik.endpoint.QueueEndpoint;
 import net.adamsmolnik.model.digest.DigestRequest;
 import net.adamsmolnik.setup.ServiceNameResolver;
 import net.adamsmolnik.util.Configuration;
@@ -30,7 +30,7 @@ public class WebSetup implements ServletContextListener {
     private OutOfMemoryAlarm oomAlarm;
 
     @Inject
-    private SimpleSqsEndpoint endpoint;
+    private QueueEndpoint queueEndpoint;
 
     @Inject
     private DigestController dc;
@@ -41,10 +41,10 @@ public class WebSetup implements ServletContextListener {
     @Override
     public void contextInitialized(ServletContextEvent sce) {
         Map<String, String> confMap = conf.getServiceConfMap(snr.getServiceName());
-        endpoint.handleJson((request) -> {
+        queueEndpoint.handleJson((request) -> {
             return dc.execute(request);
         }, DigestRequest.class, confMap.get("queueIn"), confMap.get("queueOut"));
-        endpoint.handleVoid((request) -> {
+        queueEndpoint.handleVoid((request) -> {
             oomAlarm.setAsReported();
         }, confMap.get("oomExceptionsQueue"));
 
@@ -52,7 +52,7 @@ public class WebSetup implements ServletContextListener {
 
     @Override
     public void contextDestroyed(ServletContextEvent sce) {
-        endpoint.shutdown();
+        queueEndpoint.shutdown();
         scheduler.shutdown();
     }
 
