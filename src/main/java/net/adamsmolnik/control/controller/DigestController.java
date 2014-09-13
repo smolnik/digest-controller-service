@@ -68,7 +68,7 @@ public class DigestController {
             log.err(ex);
             String mediumServerDomain = "medium.digest.adamsmolnik.com";
             FallbackSetupParams fsp = new FallbackSetupParams().withLabel("fallback server instance for " + snr.getServiceName())
-                    .withWaitForOOMAlarm(true).withInstanceType("t2.small").withImageId("ami-2e0ea946")
+                    .withWaitForOOMAlarm(true).withInstanceType("t2.small").withImageId("ami-7623811e")
                     .withLoadBalancerAndDnsNames("digest-service-elb-medium", mediumServerDomain).withServiceContext(serviceContext);
             FallbackServerInstance fallback = fsib.build(fsp);
             String mediumServiceUrl = buildServiceUrl(mediumServerDomain);
