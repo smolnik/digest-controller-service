@@ -61,9 +61,7 @@ public class DigestController {
                 }
             }
             return sender.trySending(basicServiceUrl, digestRequest, responseClass, new SendingParams().withNumberOfAttempts(7)
-                    .withAttemptIntervalSecs(10).withLogExceptiomAttemptConsumer((message) -> {
-                        log.err(message);
-                    }));
+                    .withAttemptIntervalSecs(10).withLogExceptiomAttemptConsumer(log::err));
         } catch (SenderException ex) {
             log.err(ex);
             String mediumServerDomain = "medium.digest.adamsmolnik.com";
