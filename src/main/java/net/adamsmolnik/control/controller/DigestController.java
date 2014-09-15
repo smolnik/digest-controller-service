@@ -12,9 +12,10 @@ import net.adamsmolnik.model.digest.DigestResponse;
 import net.adamsmolnik.newinstance.SenderException;
 import net.adamsmolnik.sender.Sender;
 import net.adamsmolnik.sender.SendingParams;
-import net.adamsmolnik.setup.ServiceNameResolver;
+import net.adamsmolnik.util.Configuration;
 import net.adamsmolnik.util.LocalServiceUrlCache;
 import net.adamsmolnik.util.Log;
+import net.adamsmolnik.util.Util;
 
 /**
  * @author ASmolnik
@@ -24,6 +25,9 @@ import net.adamsmolnik.util.Log;
 public class DigestController {
 
     @Inject
+    private Configuration conf;
+
+    @Inject
     private FallbackServerInstanceBuilder fsib;
 
     @Inject
@@ -31,9 +35,6 @@ public class DigestController {
 
     @Inject
     private Log log;
-
-    @Inject
-    private ServiceNameResolver snr;
 
     @Inject
     private Sender<DigestRequest, DigestResponse> sender;
@@ -47,6 +48,12 @@ public class DigestController {
     private final String basicServerDomain = "digest.adamsmolnik.com";
 
     private final Class<DigestResponse> responseClass = DigestResponse.class;
+
+    private String serviceName;
+
+    void init() {
+        serviceName = conf.getServiceName();
+    }
 
     public DigestResponse execute(DigestRequest digestRequest) {
         try {
@@ -65,16 +72,15 @@ public class DigestController {
         } catch (SenderException ex) {
             log.err(ex);
             String mediumServerDomain = "medium.digest.adamsmolnik.com";
-            FallbackSetupParams fsp = new FallbackSetupParams().withLabel("fallback server instance for " + snr.getServiceName())
-                    .withWaitForOOMAlarm(true).withInstanceType("t2.small").withImageId("ami-7623811e")
+            FallbackSetupParams fsp = new FallbackSetupParams()
+                    .withLabel("fallback server instance (spawn by " + Util.getLocalHost() + ") for " + serviceName).withWaitForOOMAlarm(true)
+                    .withInstanceType("t2.small").withImageId("ami-7623811e")
                     .withLoadBalancerAndDnsNames("digest-service-elb-medium", mediumServerDomain).withServiceContext(serviceContext);
             FallbackServerInstance fallback = fsib.build(fsp);
             String mediumServiceUrl = buildServiceUrl(mediumServerDomain);
             try {
                 DigestResponse dr = sender.trySending(mediumServiceUrl, digestRequest, responseClass, new SendingParams().withNumberOfAttempts(7)
-                        .withAttemptIntervalSecs(10).withLogExceptiomAttemptConsumer((message) -> {
-                            log.err(message);
-                        }));
+                        .withAttemptIntervalSecs(10).withLogExceptiomAttemptConsumer(log::err));
                 cache.put(serviceFullPath, mediumServiceUrl);
                 fallback.scheduleCleanup(15, TimeUnit.MINUTES);
                 return dr;
