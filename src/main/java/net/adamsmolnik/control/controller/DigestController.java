@@ -1,6 +1,7 @@
 package net.adamsmolnik.control.controller;
 
 import java.util.concurrent.TimeUnit;
+import javax.annotation.PostConstruct;
 import javax.enterprise.context.Dependent;
 import javax.inject.Inject;
 import net.adamsmolnik.exceptions.ServiceException;
@@ -51,7 +52,8 @@ public class DigestController {
 
     private String serviceName;
 
-    void init() {
+    @PostConstruct
+    private void init() {
         serviceName = conf.getServiceName();
     }
 
