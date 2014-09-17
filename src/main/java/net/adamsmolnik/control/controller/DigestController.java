@@ -40,21 +40,25 @@ public class DigestController {
     @Inject
     private Sender<DigestRequest, DigestResponse> sender;
 
+    private String serviceName;
+
+    private String basicServerDomain;
+
+    private String mediumServerDomain;
+
     private final String serviceContext = "/digest-service-no-limit";
 
     private final String servicePath = "/ds/digest";
 
     private final String serviceFullPath = serviceContext + servicePath;
 
-    private final String basicServerDomain = "digest.adamsmolnik.com";
-
     private final Class<DigestResponse> responseClass = DigestResponse.class;
-
-    private String serviceName;
 
     @PostConstruct
     private void init() {
         serviceName = conf.getServiceName();
+        basicServerDomain = conf.getServiceValue("basicServerDomain");
+        mediumServerDomain = conf.getServiceValue("mediumServerDomain");
     }
 
     public DigestResponse execute(DigestRequest digestRequest) {
@@ -73,14 +77,12 @@ public class DigestController {
                     .withAttemptIntervalSecs(10).withLogExceptiomAttemptConsumer(log::err));
         } catch (SenderException ex) {
             log.err(ex);
-            String mediumServerDomain = "medium.digest.adamsmolnik.com";
             FallbackSetupParams fsp = new FallbackSetupParams()
                     .withLabel("fallback server instance (spawn by " + Util.getLocalHost() + ") for " + serviceName).withWaitForOOMAlarm(true)
                     .withInstanceType("t2.small").withImageId("ami-7623811e")
-                    .withLoadBalancerAndDnsNames("digest-service-elb-medium", mediumServerDomain).withServiceContext(serviceContext);
-            FallbackServerInstance fallback = fsib.build(fsp);
-            String mediumServiceUrl = buildServiceUrl(mediumServerDomain);
-            try {
+                    .withLoadBalancerAndDnsNames("digest-service-elb-medium", mediumServerDomain).withServiceContext(serviceContext);;
+            try (FallbackServerInstance fallback = fsib.build(fsp)) {
+                String mediumServiceUrl = buildServiceUrl(mediumServerDomain);
                 DigestResponse dr = sender.trySending(mediumServiceUrl, digestRequest, responseClass, new SendingParams().withNumberOfAttempts(7)
                         .withAttemptIntervalSecs(10).withLogExceptiomAttemptConsumer(log::err));
                 cache.put(serviceFullPath, mediumServiceUrl);
@@ -88,7 +90,6 @@ public class DigestController {
                 return dr;
             } catch (Exception exNext) {
                 log.err(exNext);
-                fallback.scheduleCleanup(0, TimeUnit.SECONDS);
                 throw new ServiceException(exNext);
             }
         }
